@@ -12,7 +12,18 @@
 
 #define F_CPU 16000000UL // Define CPU frequency 
 
+typedef enum {
+    LED_OFF,
+    LED_LOW,
+    LED_MEDIUM,
+    LED_HIGH,
+    LED_FULL
+} LED_CONTROLL_STATES;
+
 volatile uint16_t adc_value = 0; // Variable to store ADC value
+
+volatile LED_CONTROLL_STATES led_state = LED_OFF; // Variable to store LED state
+
 
 void setupADC(){
     ADMUX |= (1<<REFS0); // AVCC with external capacitor at AREF pin
@@ -44,7 +55,39 @@ int main(){
         while(ADCSRA & (1<<ADSC)); // Wait for conversion to complete
         adc_value = ADC; // Read ADC value
         Serial.println(adc_value); // Print ADC value to serial monitor
-        _delay_ms(100); // Delay for 100ms to avoid excessive ADC sampling and allow time for serial communication
-        OCR0A = adc_value / 4; // Set PWM value (ADC value is 10-bit, so divide by 4 to fit in 8-bit OCR0A)
+        _delay_ms(1000); // Delay to see if states are changed correctly
+
+        switch(led_state) {
+            case LED_OFF:
+                if (adc_value > 0) {
+                    led_state = LED_LOW;
+                    OCR0A = 64; // Set PWM value to 64 (1/16 of 1024)
+                }
+                break;
+            case LED_LOW:
+                if (adc_value > 256) {
+                    led_state = LED_MEDIUM;
+                    OCR0A = 128; // Set PWM value to 128 (1/8 of 1024)
+                }
+                break;
+            case LED_MEDIUM:
+                if (adc_value > 512) {
+                    led_state = LED_HIGH;
+                    OCR0A = 192; // Set PWM value to 192 (3/16 of 1024)
+                }
+                break;
+            case LED_HIGH:
+                if (adc_value > 768) {
+                    led_state = LED_FULL;
+                    OCR0A = 255; // Set PWM value to 256 (1/4 of 1024)
+                }
+                break;
+            case LED_FULL:
+                if(adc_value > 1000) {
+                    led_state = LED_OFF;
+                    OCR0A = 0; // Set PWM value to 0 (off)
+                } 
+                break;
+        }
     }
 }
