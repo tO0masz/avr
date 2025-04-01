@@ -1,8 +1,8 @@
 // Read ADC value from pin A0 and print it to the serial monitor
 // AREF connected to 3.3V through 4,7uF capacitor
 // A0 connected to potentiometer
-// Toogle PB5 led connected through resistor to GND
-// This code will toggle the PB5 pin with time set with readed ADC value
+// Controll PD6 led output connected through resistor to GND
+// This code will controll light output for the OC0A (PD6) led with readed ADC value and PWM
 
 #include <avr/io.h>
 // include ardino to print to serial monitor
@@ -14,11 +14,6 @@
 
 volatile uint16_t adc_value = 0; // Variable to store ADC value
 
-ISR(TIMER1_COMPA_vect) {
-  OCR1A = adc_value; // Set compare value for Timer1
-  PORTB ^= (1 << PB5); // Toggle PB5
-}
-
 void setupADC(){
     ADMUX |= (1<<REFS0); // AVCC with external capacitor at AREF pin
     // No MUXn set, so ADC0 is selected
@@ -27,16 +22,12 @@ void setupADC(){
 }
 
 void setupLed(){
-    cli(); // Disable global interrupts
-    DDRB = 0xFF; // Set PORTB as output
-    PORTB = 0x00; // Initialize PORTB to 0
-
-    // Set up Timer1
-    TCCR1B |= (1<<WGM12); // Set CTC mode
-    TCCR1B |= (1<<CS10) | (1<<CS12); // Set prescaler to 1024
-    OCR1A = 0; // Set compare value
-    TIMSK1 |= (1<<OCIE1A); // Enable Timer1 compare A interrupt
-    sei(); // Enable global interrupts
+    // Setup Timer0 for PWM
+    TCCR0A |= (1<<WGM00) | (1<<WGM01) | // Fast PWM mode
+                (1<<COM0A1); // Clear OC0A on Compare Match when up-counting. Set OC0A on Compare Match when down-counting
+    TCCR0B |= (1<<CS02) | (1<<CS00); // Set prescaler to 1024
+    OCR0A = 0; // Set initial compare value to 0
+    DDRD |= (1<<PD6); // Set OC0A (PD6) as output
 }
 
 int main(){
@@ -54,5 +45,6 @@ int main(){
         adc_value = ADC; // Read ADC value
         Serial.println(adc_value); // Print ADC value to serial monitor
         _delay_ms(100); // Delay for 100ms to avoid excessive ADC sampling and allow time for serial communication
+        OCR0A = adc_value / 4; // Set PWM value (ADC value is 10-bit, so divide by 4 to fit in 8-bit OCR0A)
     }
 }
