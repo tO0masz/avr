@@ -6,7 +6,7 @@
 // include ardino to print to serial monitor
 #include <Arduino.h>
 
-int main(){
+int read_adc_value(){
     
     Serial.begin(9600); // Initialize serial communication at 9600 bps
 
