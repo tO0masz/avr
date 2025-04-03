@@ -1,71 +1,75 @@
-// Read ADC value from pin A0 and print it to the serial monitor
-// AREF connected to 3.3V through 4,7uF capacitor
-// A0 connected to potentiometer
-// Controll PD6 led output connected through resistor to GND
-// This code will controll light output for the OC0A (PD6) led with readed ADC value and PWM
-// Activate led when External interrupt comes to pin PD4 (PCINT20) from Sharp GP2Y0D810Z0F distance sensor
-// This code updates the led brightness when the interrupt is triggered on PD4 (PCINT20)
+// Controll BH1750 sensor via I2C and print the value to serial monitor
+// Set BH1750 addres pin to GND co the address is 0100011 (0x23)  
 
 #include <avr/io.h>
 // include ardino to print to serial monitor
 #include <Arduino.h>
-#include <avr/interrupt.h>
 #include <util/delay.h>
 
 #define F_CPU 16000000UL // Define CPU frequency 
+#define SCL_CLOCK 400000L // Define SCL clock frequency 400kHz
+#define BH1750_ADDRESS 0x23 // Define BH1750 address
 
-volatile uint16_t adc_value = 0; // Variable to store ADC value
-volatile bool led_on = false; // Variable to store LED state
-
-ISR(PCINT2_vect){
-    if(led_on){
-        led_on = false;
-        OCR0A = adc_value / 4; // Set LED brightness based on ADC value (0-255)
-    }
-    else{
-        led_on = true;
-    }
+void i2c_init(){
+    TWSR = 0x00; // Set TWI prescaler to 0
+    // SCLf = F_CPU / (16 + (2 * (SCL_CLOCK) * PRESCALER)) Set TWI bit rate register
+    // TWBR = ((F_CPU / SCL_CLOCK) - 16) / (2 * PRESCALER); // Set TWI bit rate register
+    // TWBR = ((16000000 / 400000) - 16) / 2 = 12
+    TWBR = 0xC; // Set TWI bit rate register
 }
 
-void setupADC(){
-    ADMUX |= (1<<REFS0); // AVCC with external capacitor at AREF pin
-    // No MUXn set, so ADC0 is selected
-    ADCSRA |= (1<<ADEN) | // Enable ADC
-            (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0); // Set prescaler to 128, so clock frequency = 16MHz / 128 = 125kHz
+void i2c_start(){
+    TWCR = (1 << TWSTA) | (1 << TWEN) | (1 << TWINT); // Send start condition
+    while (!(TWCR & (1 << TWINT))); // Wait for TWINT flag to be set
 }
 
-void setupLed(){
-    // Setup Timer0 for PWM
-    TCCR0A |= (1<<WGM00) | (1<<WGM01) | // Fast PWM mode
-                (1<<COM0A1); // Clear OC0A on Compare Match when up-counting. Set OC0A on Compare Match when down-counting
-    TCCR0B |= (1<<CS02) | (1<<CS00); // Set prescaler to 1024
-    OCR0A = 0; // Set initial compare value to 0
-    DDRD |= (1<<PD6); // Set OC0A (PD6) as output
+void i2c_stop(){
+    TWCR = (1 << TWSTO) | (1 << TWINT) | (1 << TWEN); // Send stop condition
 }
 
-void setupInterrupt(){
-    cli(); // Disable global interrupts
-    DDRD &= ~(1<<PD4); // Set PD4 as input for interrupt
-    PCICR |= (1<<PCIE2); // Enable pin change interrupt for PCINT[23:16]
-    PCMSK2 |= (1<<PCINT20); // Enable pin change interrupt for PD4 (PCINT20)
-    sei(); // Enable global interrupts
+uint8_t i2c_write(uint8_t data){
+    TWDR = data;
+    TWCR = (1 << TWINT) | (1 << TWEN); // Start transmission
+    while (!(TWCR & (1 << TWINT))); // Wait for TWINT flag to be set
+    return (TWSR & 0xF8); // Return status register
+}
+
+uint8_t i2c_read_ack(void) {
+    TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWEA); // Read with ACK
+    while (!(TWCR & (1 << TWINT)));
+    return TWDR;
+}
+
+uint8_t i2c_read_nack(void) {
+    TWCR = (1 << TWINT) | (1 << TWEN); // Read without ACK
+    while (!(TWCR & (1 << TWINT)));
+    return TWDR;
 }
 
 int main(){
     
     Serial.begin(9600); // Initialize serial communication at 9600 bps
 
-    setupADC(); // Setup ADC
-
-    setupLed(); // Setup LED
-
-    setupInterrupt(); // Setup interrupt
-
+    i2c_init(); // Initialize I2C
+    volatile uint8_t data1;
+    volatile uint8_t data2;
+    volatile uint16_t lux;
 
     while(1){
-        ADCSRA |= (1<<ADSC); // Start conversion
-        while(ADCSRA & (1<<ADSC)); // Wait for conversion to complete
-        adc_value = ADC; // Read ADC value
-        Serial.println(adc_value); // Print ADC value to serial monitor
+        i2c_start(); // Send start condition
+        i2c_write(BH1750_ADDRESS << 1); // Send BH1750 address with write bit
+        // Send command to start measurement in high resolution mode
+        i2c_write(0x10); // Start measurement in high resolution mode (1lx resolution)
+        i2c_stop(); // Send stop condition
+        _delay_ms(180); // Wait for measurement to complete (Measurement Time is typically 120ms)
+
+        i2c_start(); // Send start condition
+        i2c_write(BH1750_ADDRESS << 1 | 1); // Send BH1750 address with read bit
+        data1 = i2c_read_ack(); // Read first byte (high byte)
+        data2 = i2c_read_nack(); // Read second byte (low byte)
+        i2c_stop(); // Send stop condition
+
+        lux = (data1 << 8) | data2; // Combine high and low byte to get lux value
+        Serial.println(lux); // Print lux value to serial monitor
     }
 }
